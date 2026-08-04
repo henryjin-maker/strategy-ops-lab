@@ -206,3 +206,88 @@ segment_chart = px.bar(
 )
 
 st.plotly_chart(segment_chart, use_container_width=True)
+st.divider()
+
+st.header("优惠券 A/B 实验")
+
+@st.cache_data
+def load_experiment_metrics() -> pd.DataFrame:
+    query = """
+    SELECT
+        experiment_group,
+        COUNT(*) AS user_count,
+        SUM(converted) AS converted_users,
+        ROUND(
+            CAST(SUM(converted) AS FLOAT) / COUNT(*),
+            4
+        ) AS conversion_rate,
+        ROUND(SUM(coupon_cost), 2) AS coupon_cost,
+        ROUND(SUM(net_revenue), 2) AS net_revenue,
+        ROUND(
+            SUM(net_revenue) / COUNT(*),
+            2
+        ) AS revenue_per_user
+    FROM coupon_experiment
+    GROUP BY experiment_group
+    ORDER BY experiment_group DESC;
+    """
+
+    with sqlite3.connect(DB_PATH) as conn:
+        return pd.read_sql_query(query, conn)
+
+
+experiment_metrics = load_experiment_metrics()
+
+treatment_rate = experiment_metrics.loc[
+    experiment_metrics["experiment_group"] == "实验组",
+    "conversion_rate",
+].iloc[0]
+
+control_rate = experiment_metrics.loc[
+    experiment_metrics["experiment_group"] == "对照组",
+    "conversion_rate",
+].iloc[0]
+
+conversion_lift = treatment_rate / control_rate - 1
+
+metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+metric_col1.metric(
+    "实验组转化率",
+    f"{treatment_rate:.1%}",
+)
+
+metric_col2.metric(
+    "对照组转化率",
+    f"{control_rate:.1%}",
+)
+
+metric_col3.metric(
+    "相对转化提升",
+    f"{conversion_lift:.1%}",
+)
+
+st.dataframe(
+    experiment_metrics,
+    use_container_width=True,
+    hide_index=True,
+)
+
+experiment_chart = px.bar(
+    experiment_metrics,
+    x="experiment_group",
+    y="revenue_per_user",
+    color="experiment_group",
+    text_auto=".2f",
+    labels={
+        "experiment_group": "实验分组",
+        "revenue_per_user": "人均净收入",
+    },
+)
+
+st.plotly_chart(experiment_chart, use_container_width=True)
+
+st.success(
+    f"策略结论：实验组转化率提升 {conversion_lift:.1%}。"
+    "在扣除优惠成本后，仍需结合人均净收入判断是否值得推广。"
+)
